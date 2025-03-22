@@ -1,0 +1,5 @@
+.idea/
+build/
+ddddocr/__pycache__/
+main.spec
+dist/
