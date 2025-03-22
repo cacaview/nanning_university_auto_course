@@ -1,4 +1,4 @@
-#南宁理工学院自动刷课脚本
+# 南宁理工学院自动刷课脚本
 
 自用的刷课脚本，使用本地ocr。
 
@@ -21,6 +21,8 @@ https://greasyfork.org/zh-CN/scripts/518964-%E5%8D%97%E5%AE%81%E7%90%86%E5%B7%A5
 https://huaxuekf.lanzouw.com/iqRMs2rd5sri  
 密码:37by
 
-3.由于greasyfork在国内被墙，暂时不会上传至greasyfork。请自行复制js代码到篡改猴。
+3.由于greasyfork在国内被墙，暂时不会上传至greasyfork。请自行复制[captcha.js](https://github.com/cacaview/nanning_university_auto_course/blob/master/captcha.js)代码到篡改猴。
 
-4.可以开始刷网课了，注意ocr服务后端要一直在后台开着。
+3.1添加方法：打开拓展>>篡改猴>>添加新脚本>>[复制](https://github.com/cacaview/nanning_university_auto_course/blob/master/captcha.js)粘贴代码并保存
+
+4.可以开始刷网课了，注意ocr服务后端要一直在后台开着。建议将浏览器放置在前台。
