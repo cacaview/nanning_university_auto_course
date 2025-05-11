@@ -17,6 +17,8 @@ https://greasyfork.org/zh-CN/scripts/518964-%E5%8D%97%E5%AE%81%E7%90%86%E5%B7%A5
 
 1.[安装](https://microsoftedge.microsoft.com/addons/detail/%E7%AF%A1%E6%94%B9%E7%8C%B4%E6%B5%8B%E8%AF%95%E7%89%88/fcmfnpggmnlmfebfghbfnillijihnkoh)油猴脚本（不用我多说了吧？）
 
+**注意！需要在插件页面打开浏览器的插件开发者模式，以便使用插件**
+
 2.下载ocr服务后端：
 https://huaxuekf.lanzouw.com/iqRMs2rd5sri  
 密码:37by
