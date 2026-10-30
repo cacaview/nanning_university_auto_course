@@ -1,8 +1,9 @@
 import base64
 import requests
+from pathlib import Path
 
 # 读取图片文件并进行 Base64 编码
-with open('code.png', 'rb') as f:
+with (Path(__file__).resolve().parent / 'code.png').open('rb') as f:
     img_bytes = f.read()
 img_base64 = base64.b64encode(img_bytes).decode('utf-8')
 

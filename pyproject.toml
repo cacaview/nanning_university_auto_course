@@ -1,0 +1,16 @@
+[project]
+name = "nanning-university-auto-course"
+version = "0.1.0"
+description = "Local OCR helper for the Nanning University course userscript"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "ddddocr==1.6.1",
+    "Flask>=3.1,<4",
+    "onnxruntime==1.23.2",
+]
+
+[project.optional-dependencies]
+dev = ["requests>=2.32,<3"]
+
+[tool.uv]
+package = false

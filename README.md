@@ -1,30 +1,42 @@
-# 南宁理工学院自动刷课脚本
+# 南宁理工学院课程视频脚本
 
-自用的刷课脚本，使用本地ocr。
+脚本使用本地 `ddddocr` 服务处理验证码。OCR 模型通过 PyPI 的 `ddddocr` 包安装；旧版源码副本保存在 `vendor/legacy_ddddocr/`，运行时不会从该目录导入。
 
-## 感谢
+## 环境要求
 
-使用了以下开源项目：
+- Python 3.11 或 3.12
+- [uv](https://docs.astral.sh/uv/)
+- Tampermonkey 浏览器扩展
 
-https://github.com/sml2h3/ddddocr/
+## 安装与启动
 
+在项目目录运行：
 
-https://greasyfork.org/zh-CN/scripts/518964-%E5%8D%97%E5%AE%81%E7%90%86%E5%B7%A5%E5%AD%A6%E9%99%A2%E8%87%AA%E5%8A%A8%E5%88%B7%E8%AF%BE
+```sh
+uv sync
+uv run python main.py
+```
 
-以上大佬都是mvp，本人只是躺赢狗。
+服务只监听本机 `127.0.0.1:5000`。打开 `http://127.0.0.1:5000/` 可查看服务状态。
 
-## 使用方法
+## 安装浏览器脚本
 
-1.[安装](https://microsoftedge.microsoft.com/addons/detail/%E7%AF%A1%E6%94%B9%E7%8C%B4%E6%B5%8B%E8%AF%95%E7%89%88/fcmfnpggmnlmfebfghbfnillijihnkoh)油猴脚本（不用我多说了吧？）
+在 Tampermonkey 中新建脚本，将 `captcha.js` 内容复制进去并保存。脚本只会匹配以下站点的课程页和登录页：
 
-**注意！需要在插件页面打开浏览器的插件开发者模式，以便使用插件**
+- `zxshixun.bwgl.cn`
+- `gyxy.bwgl.cn`
+- `mooc.bwgl.cn`
+- `bwgl.duxingkej.com`
 
-2.下载ocr服务后端：
-https://huaxuekf.lanzouw.com/iqRMs2rd5sri  
-密码:37by
+使用时保持本地 OCR 服务运行，并在课程播放期间让浏览器页面保持打开。
 
-3.由于greasyfork在国内被墙，暂时不会上传至greasyfork。请自行复制[captcha.js](https://github.com/cacaview/nanning_university_auto_course/blob/master/captcha.js)代码到篡改猴。
+## 手动检查脚本
 
-3.1添加方法：打开拓展>>篡改猴>>添加新脚本>>[复制](https://github.com/cacaview/nanning_university_auto_course/blob/master/captcha.js)粘贴代码并保存
+需要安装辅助依赖时运行 `uv sync --extra dev`。随后可从项目根目录运行：
 
-4.可以开始刷网课了，注意ocr服务后端要一直在后台开着。建议将浏览器放置在前台。
+```sh
+uv run --extra dev python test/test2.py
+uv run --extra dev python test/test.py
+```
+
+`test/test.py` 需要先启动 `main.py`；两段脚本都从自身所在目录读取 `code.png`，不依赖当前工作目录。

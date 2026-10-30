@@ -1,165 +1,313 @@
 // ==UserScript==
 // @name         南宁理工学院自动刷课脚本
-// @version      1.0
-// @description  稍加改进的刷课脚本，使用本地ocr模型
+// @version      1.2
+// @description  本地OCR辅助处理验证码，支持指定课程页和登录页
 // @author       cacaview
 // @match        *://zxshixun.bwgl.cn/user/node*
 // @match        *://gyxy.bwgl.cn/user/node*
 // @match        *://mooc.bwgl.cn/user/node*
-// @match        *://*/user/node*
-// @match        *://*/user/login*
-// @iconURL
+// @match        *://bwgl.duxingkej.com/user/node*
+// @match        *://zxshixun.bwgl.cn/user/login*
+// @match        *://gyxy.bwgl.cn/user/login*
+// @match        *://mooc.bwgl.cn/user/login*
+// @match        *://bwgl.duxingkej.com/user/login*
 // @grant        GM_xmlhttpRequest
-// @license    	 MIT
-// @namespace  	 yei
+// @license      MIT
+// @namespace    yei
 // @connect      127.0.0.1
 // @connect      127.0.0.1:5000
 // @downloadURL
 // @updateURL
 // ==/UserScript==
 
-// 全局变量
 let current = 0;
 let Timer = null;
-let yzm = null;
 let xuanxian = null;
 let video = null;
 let Text2 = null;
-let refreshTimer = null;
+let captchaProcessing = false;
+let captchaRetryAt = 0;
 
-// 获取当前课程索引
-function getCurrent() {
-    xuanxian = $('a[target="_self"]');
-    xuanxian.each((index, item) => {
-        if ($(item).hasClass("on")) {
-            current = index;
-            return false; // 提前结束循环
+const OCR_URL = "http://127.0.0.1:5000/api/ocr/image";
+
+function isCoursePage() {
+    return window.location.pathname.includes("/user/node");
+}
+
+function isLoginPage() {
+    return window.location.pathname.includes("/user/login");
+}
+
+function onDomReady(callback) {
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", callback, { once: true });
+    } else {
+        callback();
+    }
+}
+
+function isVisible(element) {
+    const style = window.getComputedStyle(element);
+    return style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity) !== 0 &&
+        element.getClientRects().length > 0;
+}
+
+function findCaptchaLayer() {
+    return $(".layui-layer-content:visible").filter(function () {
+        return Boolean(this.querySelector("img") && this.querySelector("input"));
+    }).first();
+}
+
+function findCaptchaImage(layer) {
+    return layer.find("img").toArray().find(image =>
+        isVisible(image) && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0
+    );
+}
+
+function findCaptchaInput(layer) {
+    return layer.find("input").toArray().find(input =>
+        isVisible(input) && !input.disabled && input.type !== "hidden"
+    );
+}
+
+function stopPlaybackMonitor() {
+    if (Timer !== null) {
+        clearInterval(Timer);
+        Timer = null;
+    }
+}
+
+function startPlaybackMonitor() {
+    stopPlaybackMonitor();
+    if (isCoursePage()) {
+        Timer = setInterval(playVideo, 1000);
+    }
+}
+
+function waitForElement(selector, timeoutMs = 10000) {
+    return new Promise(resolve => {
+        let finished = false;
+        const observer = new MutationObserver(() => finish(document.querySelector(selector)));
+        const timeout = setTimeout(() => finish(null), timeoutMs);
+
+        function finish(element) {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timeout);
+            observer.disconnect();
+            resolve(element);
         }
+
+        const existing = document.querySelector(selector);
+        if (existing) {
+            finish(existing);
+            return;
+        }
+
+        observer.observe(document.documentElement, { childList: true, subtree: true });
     });
 }
 
-// 播放下一个视频
-async function playNext() {
-    clearInterval(Timer);
-    if (current === xuanxian.length - 1) {
-        addText("已看完！");
-    } else {
-        addText("播放下个视频");
-        await pause(3);
-        xuanxian[current + 1].click();
+function waitForImage(image, timeoutMs = 10000) {
+    if (image.complete) {
+        return Promise.resolve(image.naturalWidth > 0 && image.naturalHeight > 0);
     }
+
+    return new Promise(resolve => {
+        let finished = false;
+        const timeout = setTimeout(() => finish(false), timeoutMs);
+
+        function finish(loaded) {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timeout);
+            image.removeEventListener("load", onLoad);
+            image.removeEventListener("error", onError);
+            resolve(loaded && image.naturalWidth > 0 && image.naturalHeight > 0);
+        }
+
+        function onLoad() { finish(true); }
+        function onError() { finish(false); }
+
+        image.addEventListener("load", onLoad, { once: true });
+        image.addEventListener("error", onError, { once: true });
+    });
 }
 
-// 处理验证码
-async function inputCaptcha() {
-    try {
-        if (yzm.length && yzm.is(':visible')) {
-            addText("验证码出现，准备填写验证码...");
-            await pause(2, 5);
-            const imgs = yzm.find("img");
-            const img = imgs[0].style.opacity === '0' ? imgs[1] : imgs[0];
-            const base64 = getBase64FromImage(img);
-            const ans = await getCode(base64);
-            const inputs = yzm.find("input");
-            const input = inputs[0].style.display === 'none' ? inputs[1] : inputs[0];
-            $(input).mousedown();
-            input.value = ans;
-            await pause(2, 5);
-            const playButton = $('.layui-layer-btn0');
-            if (playButton.length) {
-                playButton.click();
-                Timer = setInterval(playVideo, 1000);
-                addText("自动播放！");
-            } else {
-                location.reload();
-            }
+function getCurrent() {
+    xuanxian = $('a[target="_self"]');
+    current = 0;
+    xuanxian.each((index, item) => {
+        if ($(item).hasClass("on")) {
+            current = index;
+            return false;
         }
+    });
+    return xuanxian.length > 0;
+}
+
+async function playNext() {
+    stopPlaybackMonitor();
+    if (!xuanxian || xuanxian.length === 0) {
+        addText("未找到课程列表");
+        return;
+    }
+
+    if (current >= xuanxian.length - 1) {
+        addText("已看完！");
+        return;
+    }
+
+    addText("播放下个视频");
+    await pause(3);
+    xuanxian[current + 1].click();
+}
+
+async function inputCaptcha() {
+    if (captchaProcessing) return;
+    captchaProcessing = true;
+    let resumePlayback = true;
+
+    try {
+        const layer = findCaptchaLayer();
+        if (!layer.length) {
+            captchaRetryAt = Date.now() + 3000;
+            return;
+        }
+
+        addText("验证码出现，准备填写验证码...");
+        await pause(2, 5);
+
+        const image = findCaptchaImage(layer);
+        if (!image) {
+            addText("弹窗中的验证码图片尚未准备好");
+            captchaRetryAt = Date.now() + 3000;
+            return;
+        }
+
+        const answer = await getCode(getBase64FromImage(image));
+        const input = findCaptchaInput(layer);
+        if (!input) {
+            addText("弹窗中未找到可用的验证码输入框");
+            captchaRetryAt = Date.now() + 3000;
+            return;
+        }
+
+        input.focus();
+        input.value = answer;
+        input.dispatchEvent(new window.Event("input", { bubbles: true }));
+        input.dispatchEvent(new window.Event("change", { bubbles: true }));
+        await pause(2, 5);
+
+        const playButton = $(".layui-layer-btn0:visible").first();
+        if (!playButton.length) {
+            addText("未找到验证码提交按钮，已停止自动重试");
+            resumePlayback = false;
+            return;
+        }
+
+        playButton.trigger("click");
+        captchaRetryAt = Date.now() + 3000;
+        addText("已提交验证码，恢复播放检测");
     } catch (error) {
         addText(`验证码处理出错: ${error.message}`);
+        captchaRetryAt = Date.now() + 5000;
     } finally {
-        Timer = setInterval(playVideo, 1000);
-        addText("验证码处理完成，恢复播放检测");
+        captchaProcessing = false;
+        if (resumePlayback) startPlaybackMonitor();
     }
 }
 
-// 获取 base64 编码的图片数据
-function getBase64FromImage(img) {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    return canvas.toDataURL('image/png').split(',')[1];
+function getBase64FromImage(image) {
+    if (!image || !image.complete || image.naturalWidth === 0 || image.naturalHeight === 0) {
+        throw new Error("验证码图片尚未加载完成");
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("无法创建图片画布");
+    context.drawImage(image, 0, 0);
+    return canvas.toDataURL("image/png").split(",")[1];
 }
 
-// 辅助函数：添加文本信息到页面
 function addText(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    document.body.appendChild(div);
+    const message = String(text);
+    if (!Text2 || !Text2.length || !Text2[0].isConnected) {
+        console.info(`[课程助手] ${message}`);
+        return;
+    }
+
+    const line = document.createElement("div");
+    line.textContent = message;
+    Text2.append(line, document.createElement("br"));
+    Text2.scrollTop(Text2[0].scrollHeight);
 }
 
-// 获取验证码识别结果
 function getCode(code) {
     return new Promise((resolve, reject) => {
-        const datas = {
-            "img_base64": String(code),
-        };
         GM_xmlhttpRequest({
             method: "POST",
-            url: "http://127.0.0.1:5000/api/ocr/image",
-            data: JSON.stringify(datas),
-            headers: {
-                "Content-Type": "application/json",
-            },
+            url: OCR_URL,
+            data: JSON.stringify({ img_base64: String(code) }),
+            headers: { "Content-Type": "application/json" },
             responseType: "json",
-            onload: function (response) {
-                if (response.status === 200) {
-                    try {
-                        const result = response.response.result;
-                        if (typeof result === 'undefined') {
-                            addText("响应中缺少 'result' 字段");
-                            reject(new Error("响应中缺少 'result' 字段"));
-                        } else {
-                            addText("识别结果：" + result);
-                            resolve(result);
-                        }
-                    } catch (e) {
-                        addText("验证码识别结果解析失败");
-                        addText("原始响应: " + JSON.stringify(response.response));
-                        reject(new Error("验证码识别结果解析失败"));
-                    }
-                } else {
-                    addText("请求未授权! 状态码: " + response.status);
-                    addText("响应内容: " + JSON.stringify(response.response));
-                    reject(new Error("请求未授权，状态码: " + response.status));
+            timeout: 15000,
+            onload(response) {
+                if (response.status !== 200) {
+                    reject(new Error(`OCR服务返回状态码 ${response.status}`));
+                    return;
                 }
+
+                const result = response.response && response.response.result;
+                if (typeof result !== "string" || !result.trim()) {
+                    reject(new Error("OCR服务未返回有效识别结果"));
+                    return;
+                }
+
+                addText(`识别结果：${result}`);
+                resolve(result.trim());
             },
-            onerror: function (error) {
-                addText("请求出错: " + JSON.stringify(error));
-                reject(error);
+            onerror() {
+                reject(new Error("无法连接本地OCR服务"));
+            },
+            ontimeout() {
+                reject(new Error("本地OCR服务请求超时"));
             }
         });
     });
 }
 
-// 播放视频
 async function playVideo() {
+    if (!isCoursePage() || captchaProcessing) return;
+    if (!xuanxian || xuanxian.length === 0) {
+        addText("未找到课程列表，已停止播放检测");
+        stopPlaybackMonitor();
+        return;
+    }
+
     if (!video) {
-        if (xuanxian[current].title && xuanxian[current].title === "考试") {
+        const currentLink = xuanxian[current];
+        if (currentLink && currentLink.title === "考试") {
             addText("课已看完！");
-            clearInterval(Timer);
+            stopPlaybackMonitor();
         } else {
             getVideoElement();
         }
         return;
     }
-    yzm = $('.layui-layer-content');
-    if (yzm.length > 0) {
-        clearInterval(Timer);
+
+    const captchaLayer = findCaptchaLayer();
+    if (captchaLayer.length) {
+        if (Date.now() < captchaRetryAt) return;
+        stopPlaybackMonitor();
         await inputCaptcha();
         return;
     }
+
     if (video.paused) {
         try {
             await video.play();
@@ -173,7 +321,6 @@ async function playVideo() {
     }
 }
 
-// 获取视频元素
 function getVideoElement() {
     video = document.querySelector("video");
     if (video) {
@@ -186,18 +333,17 @@ function getVideoElement() {
     }
 }
 
-// 添加浮动容器
 function addContainer() {
-    const container = $('<container></container>');
-    container.addClass('yans');
+    const container = $("<container></container>");
+    container.addClass("yans");
     const header = $("<div></div>");
-    header.addClass('container-header');
+    header.addClass("container-header");
     header.html(`
         <div>
-            <a href='http://127.0.0.1:5000'
-               target='_blank'
+            <a href="http://127.0.0.1:5000/"
+               target="_blank"
                style="color: #2196F3; text-decoration: none; border-bottom: 1px dashed #2196F3;">
-                点击更新 ↗
+                查看本地OCR服务 ↗
             </a>
         </div>
     `);
@@ -205,34 +351,33 @@ function addContainer() {
     header.on("mousedown", function (event) {
         const shiftX = event.clientX - header.offset().left;
         const shiftY = event.clientY - header.offset().top;
-        function onMouseMove(event) {
+        function onMouseMove(moveEvent) {
             container.css({
-                left: event.pageX - shiftX + 'px',
-                top: event.pageY - shiftY + 'px'
+                left: moveEvent.pageX - shiftX + "px",
+                top: moveEvent.pageY - shiftY + "px"
             });
         }
         function onMouseUp() {
-            $(document).off('mousemove', onMouseMove);
-            $(document).off('mouseup', onMouseUp);
+            $(document).off("mousemove", onMouseMove);
+            $(document).off("mouseup", onMouseUp);
         }
-        $(document).on('mousemove', onMouseMove);
-        $(document).on('mouseup', onMouseUp);
+        $(document).on("mousemove", onMouseMove);
+        $(document).on("mouseup", onMouseUp);
     });
-    const hr = $("<hr>");
-    container.append(hr);
+
+    container.append($("<hr>"));
     Text2 = $("<div></div>");
-    Text2.addClass('container-text');
+    Text2.addClass("container-text");
     container.append(Text2);
     addText("请置于前台运行");
     addText("开启成功");
     $("body").append(container);
 }
 
-// 添加样式
 function addStyle() {
     const style = $("<style></style>");
-    style.prop('type', 'text/css');
-    style.html(`
+    style.prop("type", "text/css");
+    style.text(`
        .yans {
             position: fixed;
             top: 111px;
@@ -242,75 +387,69 @@ function addStyle() {
             background-color: #CCFFFF;
         }
     `);
-    $('body').append(style);
+    $("body").append(style);
 }
 
-// 向容器添加文本
-function addText(text) {
-    Text2.append(text + "<br>");
-    Text2.scrollTop(Text2[0].scrollHeight);
-}
-
-// 暂停指定时间
 function pause(start, end = undefined) {
-    let lay22 = start;
+    let seconds = start;
     if (end) {
-        lay22 = Math.floor(Math.random() * (end - start)) + start;
-        addText(` ${lay22} 秒后继续`);
+        seconds = Math.floor(Math.random() * (end - start)) + start;
+        addText(`${seconds} 秒后继续`);
     }
-    return new Promise(resolve => {
-        setTimeout(() => {
-            resolve();
-        }, lay22 * 1000);
-    });
+    return new Promise(resolve => setTimeout(resolve, seconds * 1000));
 }
 
-// 初始化脚本
-async function init() {
+function init() {
+    if (!isCoursePage()) return false;
+
     addContainer();
     addStyle();
-    getCurrent();
-    // 30分钟强制刷新逻辑
-    if (window.location.pathname.includes('/user/node')) {
-        const refreshMinutes = 30;
-        addText(`已启用${refreshMinutes}分钟强制刷新功能`);
-        refreshTimer = setInterval(() => {
-            addText("即将强制刷新页面...");
-            location.reload();
-        }, refreshMinutes * 60 * 1000);
+    if (!getCurrent()) {
+        addText("未找到课程列表，无法启动播放检测");
+        return false;
     }
+
+    const refreshMinutes = 30;
+    addText(`已启用${refreshMinutes}分钟强制刷新功能`);
+    setInterval(() => {
+        addText("即将强制刷新页面...");
+        location.reload();
+    }, refreshMinutes * 60 * 1000);
+    return true;
 }
 
-// 入口函数
-(function () {
-    'use strict';
-    $(document).ready(async function () {
-        await init();
-        Timer = setInterval(playVideo, 1000);
+if (isCoursePage()) {
+    onDomReady(() => {
+        if (init()) startPlaybackMonitor();
     });
-})();
+}
 
-// 验证码处理部分
-(function () {
-    async function handleCaptcha() {
-        const img = document.getElementById('codeImg');
-        if (!img) {
-            addText("未找到验证码图片元素");
+if (isLoginPage()) {
+    async function handleLoginCaptcha() {
+        const image = await waitForElement("#codeImg");
+        if (!image) {
+            addText("等待验证码图片超时");
             return;
         }
-        try {
-            const base64 = getBase64FromImage(img);
-            const code = await getCode(base64);
-            const input = document.getElementById('code');
-            if (input) {
-                input.value = code;
-            } else {
-                addText("未找到验证码输入框元素");
-            }
-        } catch (error) {
-            addText("验证码处理出错: " + error.message);
+        if (!await waitForImage(image)) {
+            addText("验证码图片加载失败");
+            return;
         }
+
+        const answer = await getCode(getBase64FromImage(image));
+        const input = await waitForElement("#code");
+        if (!input) {
+            addText("等待验证码输入框超时");
+            return;
+        }
+
+        input.focus();
+        input.value = answer;
+        input.dispatchEvent(new window.Event("input", { bubbles: true }));
+        input.dispatchEvent(new window.Event("change", { bubbles: true }));
     }
 
-    handleCaptcha();
-})();
+    onDomReady(() => {
+        handleLoginCaptcha().catch(error => addText(`验证码处理出错: ${error.message}`));
+    });
+}
