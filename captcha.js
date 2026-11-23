@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         南宁理工学院自动刷课脚本
-// @version      1.0
+// @version      1.1
 // @description  稍加改进的刷课脚本，使用本地ocr模型
 // @author       cacaview
 // @match        *://zxshixun.bwgl.cn/user/node*
@@ -13,7 +13,7 @@
 // @license    	 MIT
 // @namespace  	 yei
 // @connect      127.0.0.1
-// @connect      127.0.0.1:5000
+// @connect      127.0.0.1:5001
 // @downloadURL
 // @updateURL
 // ==/UserScript==
@@ -107,7 +107,7 @@ function getCode(code) {
         };
         GM_xmlhttpRequest({
             method: "POST",
-            url: "http://127.0.0.1:5000/api/ocr/image",
+            url: "http://127.0.0.1:5001/api/ocr/image",
             data: JSON.stringify(datas),
             headers: {
                 "Content-Type": "application/json",
@@ -194,7 +194,7 @@ function addContainer() {
     header.addClass('container-header');
     header.html(`
         <div>
-            <a href='http://127.0.0.1:5000'
+            <a href='http://127.0.0.1:5001'
                target='_blank'
                style="color: #2196F3; text-decoration: none; border-bottom: 1px dashed #2196F3;">
                 点击更新 ↗
